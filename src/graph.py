@@ -15,7 +15,10 @@ Phase 3 topology (full parallel — uncomment when Defense/TechLead are ready):
 import json
 from pathlib import Path
 
+from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
+
+load_dotenv()
 
 from src.nodes.detectives import repo_investigator_node
 from src.nodes.judges import defense_node, prosecutor_node, techlead_node
