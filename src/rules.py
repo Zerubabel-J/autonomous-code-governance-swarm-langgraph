@@ -40,18 +40,17 @@ def apply_security_rule(
     evidences: Dict[str, List[Evidence]],
 ) -> Optional[int]:
     """
-    Rule of Security: if the Prosecutor identified a confirmed security
-    vulnerability — in their argument OR in detective evidence — cap score at 3.
+    Rule of Security: if detective evidence confirms a security violation,
+    cap score at 3.
+
+    IMPORTANT: Only forensic evidence (ev.rationale from AST tools) is trusted
+    for rule activation. LLM opinion arguments are NOT checked — adversarial
+    judges may mention security keywords in negative or hypothetical contexts,
+    which would cause false positive caps.
 
     Returns the cap value (3) if triggered, else None.
     """
-    # Check Prosecutor opinions first
-    for opinion in opinions:
-        if opinion.judge == "Prosecutor":
-            if _contains_security_violation(opinion.argument):
-                return 3
-
-    # Check evidence rationale directly (facts override opinions — RISK-1)
+    # Only check detective evidence rationale (ground truth from AST tools)
     for ev_list in evidences.values():
         for ev in ev_list:
             if _contains_security_violation(ev.rationale):

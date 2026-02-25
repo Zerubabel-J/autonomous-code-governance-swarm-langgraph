@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 
 from src.rules import (
     apply_evidence_rule,
@@ -36,7 +36,7 @@ _DIMENSION_NAMES: dict[str, str] = {
     d["id"]: d["name"] for d in _RUBRIC["dimensions"]
 }
 
-_MODEL = "gemini-2.0-flash"
+_MODEL = "gpt-4o-mini"
 
 # Repo-targeted criteria handled by RepoInvestigator
 _REPO_CRITERIA = [
@@ -166,7 +166,7 @@ def _generate_remediation(
         )
 
     # Deterministic messages for common patterns
-    if score <= 1:
+    if score <= 2:
         return _deterministic_remediation(criterion_id, score)
 
     if score >= 4:
@@ -195,14 +195,14 @@ def _deterministic_remediation(criterion_id: str, score: int) -> str:
             "and ChiefJustice synthesis. See rubric for required topology."
         ),
         "safe_tool_engineering": (
-            "src/tools/ directory missing or empty. "
+            "Tools implementation incomplete or missing. "
             "Implement clone_repo_sandboxed() using tempfile.TemporaryDirectory() "
-            "and subprocess.run() with capture_output=True."
+            "and subprocess.run() with capture_output=True. Avoid os.system()."
         ),
         "structured_output_enforcement": (
-            "src/nodes/judges.py not found. "
-            "Implement Prosecutor, Defense, and TechLead nodes using "
-            "llm.with_structured_output(JudicialOpinion) for all LLM calls."
+            "Structured output binding incomplete. "
+            "Ensure all judge nodes call llm.with_structured_output(JudicialOpinion) "
+            "and that every LLM call is schema-constrained with no free-text fallback."
         ),
     }
     return messages.get(criterion_id, f"Score {score}/5: significant gaps detected. Review rubric for {criterion_id}.")
@@ -215,7 +215,7 @@ def _llm_remediation(
 ) -> str:
     """Generate targeted remediation using judge arguments as context."""
     try:
-        llm = ChatGoogleGenerativeAI(model=_MODEL, temperature=0.1)
+        llm = ChatOpenAI(model=_MODEL, temperature=0.1)
         arguments = "\n".join(
             f"- {o.judge} (score {o.score}): {o.argument[:200]}"
             for o in opinions[:3]

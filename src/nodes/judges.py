@@ -17,11 +17,12 @@ but raise NotImplementedError until Phase 3.
 """
 
 import json
+import time
 from pathlib import Path
 from typing import List
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 
 from src.state import AgentState, Evidence, JudicialOpinion
 
@@ -39,11 +40,11 @@ _DIMENSIONS_BY_ID: dict[str, dict] = {
 # Shared LLM factory — model name in one place
 # ---------------------------------------------------------------------------
 
-_MODEL = "gemini-2.0-flash"
+_MODEL = "gpt-4o-mini"
 
 
-def _make_llm() -> ChatGoogleGenerativeAI:
-    return ChatGoogleGenerativeAI(model=_MODEL, temperature=0.2)
+def _make_llm() -> ChatOpenAI:
+    return ChatOpenAI(model=_MODEL, temperature=0.2)
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +165,9 @@ def prosecutor_node(state: AgentState) -> dict:
                 argument=f"[PROSECUTOR ERROR] Structured output failed: {str(exc)[:200]}",
                 cited_evidence=[],
             ))
+
+        # Respect Gemini free-tier rate limit (15 RPM) — 5s gap = 12 RPM
+        time.sleep(5)
 
     return {"opinions": opinions}
 
