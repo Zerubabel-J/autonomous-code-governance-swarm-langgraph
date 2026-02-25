@@ -168,13 +168,25 @@ def test_chief_justice_produces_report():
 def test_chief_justice_score_cap_on_security_violation():
     from src.nodes.justice import chief_justice_node
 
-    # Prosecutor flags os.system — score must be capped at 3
-    opinions_with_violation = [
+    # Detective evidence (not LLM opinion) confirms os.system — score must be capped at 3.
+    # The security rule only fires on forensic evidence rationale, not opinion arguments.
+    evidences_with_violation = make_full_evidences()
+    evidences_with_violation["repo_investigator_safe_tool_engineering"] = [
+        Evidence(
+            goal="Check safe tool engineering",
+            found=True,
+            location="src/tools/repo_tools.py",
+            rationale="os.system call detected — security violation confirmed by AST",
+            confidence=1.0,
+        )
+    ]
+
+    opinions_with_high_score = [
         JudicialOpinion(
             judge="Prosecutor",
             criterion_id="safe_tool_engineering",
             score=5,  # Would be high without rule
-            argument="os.system() call detected — security violation",
+            argument="Structured tools found.",
             cited_evidence=[],
         )
     ] + [make_opinion(cid) for cid in _REPO_CRITERIA if cid != "safe_tool_engineering"]
@@ -183,8 +195,8 @@ def test_chief_justice_score_cap_on_security_violation():
         "repo_url": "https://github.com/test/repo",
         "pdf_path": "",
         "rubric_dimensions": [],
-        "evidences": make_full_evidences(),
-        "opinions": opinions_with_violation,
+        "evidences": evidences_with_violation,
+        "opinions": opinions_with_high_score,
         "final_report": None,
     }
     result = chief_justice_node(state)

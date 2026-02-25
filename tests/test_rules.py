@@ -39,40 +39,54 @@ def make_opinion(judge="Prosecutor", score=3, argument="test", cited=None) -> Ju
 # ---------------------------------------------------------------------------
 
 
-def test_security_rule_triggers_on_os_system_in_argument():
-    opinion = make_opinion(judge="Prosecutor", argument="Found raw os.system call in repo_tools.py")
-    cap = apply_security_rule([opinion], {})
-    assert cap == 3
-
-
-def test_security_rule_triggers_on_shell_injection_keyword():
-    opinion = make_opinion(judge="Prosecutor", argument="This is a shell injection risk")
-    cap = apply_security_rule([opinion], {})
-    assert cap == 3
-
-
-def test_security_rule_triggers_on_evidence_rationale():
+def test_security_rule_triggers_on_os_system_in_evidence_rationale():
+    """Ground truth: forensic evidence rationale triggers the security cap."""
     ev = make_evidence(rationale="os.system call detected in clone function")
     cap = apply_security_rule([], {"repo_investigator_safe_tool_engineering": [ev]})
     assert cap == 3
 
 
-def test_security_rule_does_not_trigger_on_clean_argument():
-    opinion = make_opinion(judge="Prosecutor", argument="No issues found. Good sandboxing.")
+def test_security_rule_triggers_on_shell_injection_in_evidence():
+    """Shell injection keyword in evidence rationale triggers the cap."""
+    ev = make_evidence(rationale="shell injection risk detected via AST analysis")
+    cap = apply_security_rule([], {"repo_investigator_safe_tool_engineering": [ev]})
+    assert cap == 3
+
+
+def test_security_rule_does_not_trigger_on_opinion_argument():
+    """LLM opinion arguments must NOT trigger the security cap.
+    Adversarial judges may mention 'os.system' in negative/hypothetical context."""
+    opinion = make_opinion(judge="Prosecutor", argument="Found raw os.system call in repo_tools.py")
     cap = apply_security_rule([opinion], {})
     assert cap is None
 
 
-def test_security_rule_ignores_defense_arguments():
-    """Security rule only fires on Prosecutor opinions and evidence — not Defense."""
-    opinion = make_opinion(judge="Defense", argument="They used os.system but tried hard")
+def test_security_rule_does_not_trigger_on_negative_mention_in_opinion():
+    """False positive guard: 'os.system() calls are not present' must not cap score."""
+    opinion = make_opinion(judge="Prosecutor", argument="Raw os.system() calls are not present.")
     cap = apply_security_rule([opinion], {})
     assert cap is None
 
 
-def test_security_rule_is_case_insensitive():
-    opinion = make_opinion(judge="Prosecutor", argument="OS.SYSTEM CALL DETECTED")
-    cap = apply_security_rule([opinion], {})
+def test_security_rule_does_not_trigger_on_clean_evidence():
+    ev = make_evidence(rationale="subprocess.run with tempfile.TemporaryDirectory used correctly")
+    cap = apply_security_rule([], {"repo_investigator_safe_tool_engineering": [ev]})
+    assert cap is None
+
+
+def test_security_rule_ignores_all_opinion_arguments():
+    """Security rule does not inspect any opinion arguments — only evidence rationale."""
+    opinions = [
+        make_opinion(judge="Prosecutor", argument="os.system detected — critical violation"),
+        make_opinion(judge="Defense", argument="shell injection risk but developer tried"),
+    ]
+    cap = apply_security_rule(opinions, {})
+    assert cap is None
+
+
+def test_security_rule_is_case_insensitive_in_evidence():
+    ev = make_evidence(rationale="OS.SYSTEM CALL DETECTED")
+    cap = apply_security_rule([], {"key": [ev]})
     assert cap == 3
 
 
