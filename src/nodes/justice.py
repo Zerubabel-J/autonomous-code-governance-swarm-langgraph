@@ -38,7 +38,10 @@ _DIMENSION_NAMES: dict[str, str] = {
 
 _MODEL = "gpt-4o-mini"
 
-# Repo-targeted criteria handled by RepoInvestigator
+# All known criteria from rubric.json
+_ALL_CRITERIA = [d["id"] for d in _RUBRIC["dimensions"]]
+
+# Repo-targeted criteria — RepoInvestigator must always produce these
 _REPO_CRITERIA = [
     "git_forensic_analysis",
     "state_management_rigor",
@@ -47,8 +50,12 @@ _REPO_CRITERIA = [
     "structured_output_enforcement",
 ]
 
-# Expected evidence keys that must exist before judges run
-_EXPECTED_EVIDENCE_KEYS = [
+# PDF criteria — optional, only present when a PDF is provided
+_PDF_CRITERIA = ["theoretical_depth", "report_accuracy"]
+_IMAGE_CRITERIA = ["swarm_visual"]
+
+# Minimum required evidence — repo detective must always produce these
+_REQUIRED_EVIDENCE_KEYS = [
     f"repo_investigator_{cid}" for cid in _REPO_CRITERIA
 ]
 
@@ -65,7 +72,7 @@ def evidence_aggregator_node(state: AgentState) -> dict:
     partial-evidence audits reaching the judicial layer.
     """
     present = set(state.get("evidences", {}).keys())
-    missing = [k for k in _EXPECTED_EVIDENCE_KEYS if k not in present]
+    missing = [k for k in _REQUIRED_EVIDENCE_KEYS if k not in present]
 
     if missing:
         raise ValueError(
@@ -93,7 +100,10 @@ def chief_justice_node(state: AgentState) -> dict:
 
     criterion_results = []
 
-    for criterion_id in _REPO_CRITERIA:
+    # Discover all criteria that have both evidence and opinions
+    evaluated_criteria = _discover_evaluated_criteria(all_opinions, evidences)
+
+    for criterion_id in evaluated_criteria:
         opinions = [o for o in all_opinions if o.criterion_id == criterion_id]
         result = _adjudicate_criterion(criterion_id, opinions, evidences)
         criterion_results.append(result)
@@ -112,6 +122,17 @@ def chief_justice_node(state: AgentState) -> dict:
     )
 
     return {"final_report": report}
+
+
+def _discover_evaluated_criteria(
+    opinions: list[JudicialOpinion],
+    evidences: dict,
+) -> list[str]:
+    """Find all criteria that have at least one opinion."""
+    criteria_with_opinions = {o.criterion_id for o in opinions}
+    # Maintain rubric order for consistent reporting
+    ordered = [cid for cid in _ALL_CRITERIA if cid in criteria_with_opinions]
+    return ordered
 
 
 def _adjudicate_criterion(
@@ -203,6 +224,29 @@ def _deterministic_remediation(criterion_id: str, score: int) -> str:
             "Structured output binding incomplete. "
             "Ensure all judge nodes call llm.with_structured_output(JudicialOpinion) "
             "and that every LLM call is schema-constrained with no free-text fallback."
+        ),
+        "theoretical_depth": (
+            "PDF report lacks theoretical depth. "
+            "Include substantive explanations of Dialectical Synthesis, Fan-In/Fan-Out, "
+            "and State Synchronization tied to actual implementation decisions."
+        ),
+        "report_accuracy": (
+            "PDF report references file paths not found in the repository. "
+            "Ensure all claimed file paths exist and feature claims match code evidence."
+        ),
+        "swarm_visual": (
+            "No architecture diagram found in PDF report. "
+            "Include a diagram showing parallel fan-out/fan-in for both detectives and judges."
+        ),
+        "judicial_nuance": (
+            "Judge personas lack distinction. "
+            "Ensure Prosecutor, Defense, and TechLead have conflicting system prompts "
+            "with <50% shared text."
+        ),
+        "chief_justice_synthesis": (
+            "ChiefJustice lacks deterministic rules. "
+            "Implement security override, fact supremacy, functionality weight, "
+            "and dissent requirement as Python if/else logic."
         ),
     }
     return messages.get(criterion_id, f"Score {score}/5: significant gaps detected. Review rubric for {criterion_id}.")
