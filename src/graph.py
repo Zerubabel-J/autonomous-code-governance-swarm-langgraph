@@ -1,10 +1,7 @@
 """
 LangGraph StateGraph wiring for the Automaton Auditor.
 
-Phase 1 topology (linear PoC — proves the pipeline):
-  START → repo_investigator → evidence_aggregator → prosecutor → chief_justice → END
-
-Phase 3 topology (full parallel — uncomment when Defense/TechLead are ready):
+Full production topology:
   START → [repo_investigator ‖ doc_analyst ‖ vision_inspector]
         → evidence_aggregator
         → [prosecutor ‖ defense ‖ techlead]
@@ -20,48 +17,59 @@ from langgraph.graph import END, START, StateGraph
 
 load_dotenv()
 
-from src.nodes.detectives import repo_investigator_node
+from src.nodes.detectives import doc_analyst_node, repo_investigator_node, vision_inspector_node
 from src.nodes.judges import defense_node, prosecutor_node, techlead_node
 from src.nodes.justice import chief_justice_node, evidence_aggregator_node, render_markdown_report
 from src.state import AgentState
 
 
-def build_graph(parallel: bool = False):
+def build_graph(parallel: bool = True):
     """
     Build and compile the auditor StateGraph.
 
     Args:
-        parallel: If True, detectives and judges run in parallel fan-out.
-                  If False (default), linear Phase 1 topology is used.
+        parallel: If True (default), full parallel fan-out for both
+                  detectives and judges. If False, linear single-detective
+                  single-judge topology for testing.
     """
     builder = StateGraph(AgentState)
 
     # --- Nodes ---
     builder.add_node("repo_investigator", repo_investigator_node)
+    builder.add_node("doc_analyst", doc_analyst_node)
+    builder.add_node("vision_inspector", vision_inspector_node)
     builder.add_node("evidence_aggregator", evidence_aggregator_node)
     builder.add_node("prosecutor", prosecutor_node)
+    builder.add_node("defense", defense_node)
+    builder.add_node("techlead", techlead_node)
     builder.add_node("chief_justice", chief_justice_node)
 
     if parallel:
-        # Phase 3: parallel fan-out for judges
-        builder.add_node("defense", defense_node)
-        builder.add_node("techlead", techlead_node)
+        # --- Detective fan-out: all 3 run in parallel from START ---
+        builder.add_edge(START, "repo_investigator")
+        builder.add_edge(START, "doc_analyst")
+        builder.add_edge(START, "vision_inspector")
 
-    # --- Edges ---
-    builder.add_edge(START, "repo_investigator")
-    builder.add_edge("repo_investigator", "evidence_aggregator")
+        # --- Detective fan-in: all 3 must complete before aggregator ---
+        builder.add_edge("repo_investigator", "evidence_aggregator")
+        builder.add_edge("doc_analyst", "evidence_aggregator")
+        builder.add_edge("vision_inspector", "evidence_aggregator")
 
-    if parallel:
-        # Fan-out: all three judges receive the same aggregated evidence
+        # --- Judge fan-out: all 3 run in parallel ---
         builder.add_edge("evidence_aggregator", "prosecutor")
         builder.add_edge("evidence_aggregator", "defense")
         builder.add_edge("evidence_aggregator", "techlead")
-        # Fan-in: chief_justice waits for all three
+
+        # --- Judge fan-in: chief_justice waits for all 3 ---
         builder.add_edge("prosecutor", "chief_justice")
         builder.add_edge("defense", "chief_justice")
         builder.add_edge("techlead", "chief_justice")
     else:
-        # Phase 1: linear — single prosecutor
+        # Linear topology — for testing without parallel overhead
+        builder.add_edge(START, "repo_investigator")
+        builder.add_edge("repo_investigator", "doc_analyst")
+        builder.add_edge("doc_analyst", "vision_inspector")
+        builder.add_edge("vision_inspector", "evidence_aggregator")
         builder.add_edge("evidence_aggregator", "prosecutor")
         builder.add_edge("prosecutor", "chief_justice")
 
@@ -70,15 +78,20 @@ def build_graph(parallel: bool = False):
     return builder.compile()
 
 
-def run_audit(repo_url: str, pdf_path: str = "", output_path: str | None = None, parallel: bool = False) -> str:
+def run_audit(
+    repo_url: str,
+    pdf_path: str = "",
+    output_path: str | None = None,
+    parallel: bool = True,
+) -> str:
     """
     Run the full audit pipeline against a repository.
 
     Args:
         repo_url:    GitHub repository URL to audit.
-        pdf_path:    Path to PDF report (optional, used by DocAnalyst in Phase 4).
+        pdf_path:    Path to PDF report (optional, used by DocAnalyst + VisionInspector).
         output_path: If provided, write the Markdown report to this file.
-        parallel:    Enable parallel judge fan-out (Phase 3+).
+        parallel:    Enable parallel fan-out for detectives and judges (default True).
 
     Returns:
         Rendered Markdown audit report as a string.
