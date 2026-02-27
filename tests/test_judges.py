@@ -22,6 +22,14 @@ from src.state import AgentState, Evidence, JudicialOpinion
 # Fixtures
 # ---------------------------------------------------------------------------
 
+_REPO_CRITERIA = [
+    "git_forensic_analysis",
+    "state_management_rigor",
+    "graph_orchestration",
+    "safe_tool_engineering",
+    "structured_output_enforcement",
+]
+
 
 def make_evidence(found=True, location="src/state.py", rationale="exists", content=None) -> Evidence:
     return Evidence(
@@ -34,12 +42,28 @@ def make_evidence(found=True, location="src/state.py", rationale="exists", conte
     )
 
 
+def _make_repo_evidences() -> dict:
+    """Generate the 5 repo evidence keys so judges discover 5 criteria."""
+    return {
+        f"repo_investigator_{cid}": [
+            Evidence(
+                goal=f"Check {cid}",
+                found=True,
+                location="src/state.py",
+                rationale=f"Synthetic evidence for {cid}",
+                confidence=1.0,
+            )
+        ]
+        for cid in _REPO_CRITERIA
+    }
+
+
 def make_state(evidences: dict = None) -> AgentState:
     return AgentState(
         repo_url="https://github.com/test/repo",
         pdf_path="",
         rubric_dimensions=[],
-        evidences=evidences or {},
+        evidences=evidences if evidences is not None else _make_repo_evidences(),
         opinions=[],
         final_report=None,
     )
@@ -151,18 +175,11 @@ def _make_mock_chain(invoke_fn):
     return chain
 
 
+@patch("src.nodes.judges.time")
 @patch("src.nodes.judges._make_llm")
 @patch("src.nodes.judges.ChatPromptTemplate")
-def test_prosecutor_node_returns_5_opinions(mock_prompt_cls, mock_make_llm):
+def test_prosecutor_node_returns_5_opinions(mock_prompt_cls, mock_make_llm, mock_time):
     """Prosecutor must return one opinion per repo-targeted criterion."""
-    criteria = [
-        "git_forensic_analysis",
-        "state_management_rigor",
-        "graph_orchestration",
-        "safe_tool_engineering",
-        "structured_output_enforcement",
-    ]
-
     def invoke_fn(inputs):
         return JudicialOpinion(
             judge="Prosecutor",
@@ -184,12 +201,13 @@ def test_prosecutor_node_returns_5_opinions(mock_prompt_cls, mock_make_llm):
     assert len(opinions) == 5
     assert all(isinstance(o, JudicialOpinion) for o in opinions)
     assert all(o.judge == "Prosecutor" for o in opinions)
-    assert {o.criterion_id for o in opinions} == set(criteria)
+    assert {o.criterion_id for o in opinions} == set(_REPO_CRITERIA)
 
 
+@patch("src.nodes.judges.time")
 @patch("src.nodes.judges._make_llm")
 @patch("src.nodes.judges.ChatPromptTemplate")
-def test_prosecutor_node_corrects_wrong_judge_label(mock_prompt_cls, mock_make_llm):
+def test_prosecutor_node_corrects_wrong_judge_label(mock_prompt_cls, mock_make_llm, mock_time):
     """If LLM returns wrong judge label, node must correct it to Prosecutor."""
     def invoke_fn(inputs):
         return JudicialOpinion(
@@ -209,9 +227,10 @@ def test_prosecutor_node_corrects_wrong_judge_label(mock_prompt_cls, mock_make_l
     assert all(o.judge == "Prosecutor" for o in result["opinions"])
 
 
+@patch("src.nodes.judges.time")
 @patch("src.nodes.judges._make_llm")
 @patch("src.nodes.judges.ChatPromptTemplate")
-def test_prosecutor_node_handles_llm_failure_gracefully(mock_prompt_cls, mock_make_llm):
+def test_prosecutor_node_handles_llm_failure_gracefully(mock_prompt_cls, mock_make_llm, mock_time):
     """On LLM exception, node returns fallback opinions — never crashes graph."""
     def invoke_fn(inputs):
         raise RuntimeError("API timeout")

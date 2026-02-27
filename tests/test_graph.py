@@ -78,15 +78,18 @@ def test_parallel_graph_compiles():
 def test_linear_graph_has_required_nodes():
     graph = build_graph(parallel=False)
     nodes = set(graph.nodes)
-    for required in ["repo_investigator", "evidence_aggregator", "prosecutor", "chief_justice"]:
+    for required in ["repo_investigator", "doc_analyst", "vision_inspector",
+                     "evidence_aggregator", "prosecutor", "chief_justice"]:
         assert required in nodes, f"Missing node: {required}"
 
 
-def test_parallel_graph_has_all_judge_nodes():
+def test_parallel_graph_has_all_nodes():
     graph = build_graph(parallel=True)
     nodes = set(graph.nodes)
-    for required in ["prosecutor", "defense", "techlead"]:
-        assert required in nodes, f"Missing judge node: {required}"
+    for required in ["repo_investigator", "doc_analyst", "vision_inspector",
+                     "prosecutor", "defense", "techlead",
+                     "evidence_aggregator", "chief_justice"]:
+        assert required in nodes, f"Missing node: {required}"
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +317,7 @@ def test_markdown_no_dissent_section_when_absent():
 # ---------------------------------------------------------------------------
 
 
+@patch("src.nodes.judges.time")
 @patch("src.nodes.judges.ChatPromptTemplate")
 @patch("src.nodes.judges._make_llm")
 @patch("src.nodes.detectives.clone_repo_sandboxed")
@@ -324,9 +328,9 @@ def test_markdown_no_dissent_section_when_absent():
 @patch("src.nodes.detectives.check_structured_output_enforcement")
 def test_end_to_end_synthetic_pipeline(
     mock_structured, mock_safe, mock_graph, mock_state,
-    mock_git, mock_clone, mock_make_llm, mock_prompt_cls,
+    mock_git, mock_clone, mock_make_llm, mock_prompt_cls, mock_time,
 ):
-    """Full pipeline: repo_investigator → aggregator → prosecutor → chief_justice."""
+    """Full pipeline with all 3 detectives: RI → DA → VI → aggregator → prosecutor → CJ."""
     from pathlib import Path
     from tempfile import TemporaryDirectory
 
@@ -334,14 +338,16 @@ def test_end_to_end_synthetic_pipeline(
     tmpdir = TemporaryDirectory()
     mock_clone.return_value = (tmpdir, Path(tmpdir.name))
 
-    # Mock tool results
+    # Mock tool results (RepoInvestigator forensic tools)
     mock_git.return_value = {"commits": ["abc init"], "total_count": 1, "has_progression": False, "is_bulk_upload": True, "error": None}
     mock_state.return_value = {"found": True, "location": "src/state.py", "parse_error": None, "has_basemodel": True, "has_typeddict": True, "has_reducers": True}
     mock_graph.return_value = {"found": True, "location": "src/graph.py", "parse_error": None, "has_stategraph": True, "has_fan_out": True, "has_aggregator": True, "edge_count": 6}
     mock_safe.return_value = {"found": True, "location": "src/tools/", "uses_tempfile": True, "uses_subprocess": True, "has_os_system": False, "parse_error": None}
     mock_structured.return_value = {"found": True, "location": "src/nodes/judges.py", "has_structured_output": True, "has_judicial_opinion_binding": True, "parse_error": None}
 
-    # Mock LLM chain
+    # DocAnalyst + VisionInspector need no mocking — they handle empty pdf_path gracefully
+
+    # Mock LLM chain for Prosecutor
     def invoke_fn(inputs):
         return JudicialOpinion(
             judge="Prosecutor",
@@ -370,9 +376,18 @@ def test_end_to_end_synthetic_pipeline(
 
     final_state = graph.invoke(initial_state)
 
+    # Verify report produced
     assert final_state["final_report"] is not None
     report = final_state["final_report"]
     assert 1.0 <= report.overall_score <= 5.0
-    assert len(report.criteria) == 5
-    assert len(final_state["opinions"]) == 5
-    assert all(k.startswith("repo_investigator_") for k in final_state["evidences"])
+
+    # 8 criteria: 5 repo + 2 doc (theoretical_depth, report_accuracy) + 1 vision (swarm_visual)
+    assert len(report.criteria) == 8
+    assert len(final_state["opinions"]) == 8
+
+    # Verify all three detective prefixes present in evidence keys
+    evidence_keys = set(final_state["evidences"].keys())
+    assert any(k.startswith("repo_investigator_") for k in evidence_keys)
+    assert any(k.startswith("doc_analyst_") for k in evidence_keys)
+    assert any(k.startswith("vision_inspector_") for k in evidence_keys)
+    assert len(evidence_keys) == 8
