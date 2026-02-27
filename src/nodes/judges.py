@@ -12,8 +12,8 @@ Judges receive only structured metadata fields.
 RISK-1 MITIGATION: Judges produce raw opinions only. No scoring logic here.
 All score resolution happens in ChiefJustice via deterministic rules.
 
-Phase 1 scope: Prosecutor only. Defense and TechLead nodes are present
-but raise NotImplementedError until Phase 3.
+All three judges run in parallel. Each evaluates every criterion
+that has collected evidence — both repo and PDF criteria.
 """
 
 import json
@@ -84,6 +84,30 @@ def _get_criterion_rubric(criterion_id: str) -> str:
     )
 
 
+def _collect_evidence_for_criterion(
+    evidences: dict, criterion_id: str,
+) -> list:
+    """Collect evidence from ALL detectives for a given criterion_id."""
+    all_ev = []
+    for key, ev_list in evidences.items():
+        if key.endswith(f"_{criterion_id}"):
+            all_ev.extend(ev_list)
+    return all_ev
+
+
+def _find_evaluated_criteria(evidences: dict) -> list[str]:
+    """Discover all unique criterion IDs from available evidence keys."""
+    criteria = set()
+    for key in evidences:
+        # Keys are "{detective}_{criterion_id}" — split from the right is unreliable
+        # Instead, check against known rubric dimension IDs
+        for dim_id in _DIMENSIONS_BY_ID:
+            if key.endswith(f"_{dim_id}"):
+                criteria.add(dim_id)
+                break
+    return sorted(criteria)
+
+
 # ---------------------------------------------------------------------------
 # Prosecutor Node
 # ---------------------------------------------------------------------------
@@ -109,39 +133,41 @@ Return a JudicialOpinion with judge="Prosecutor". No prose outside the structure
 
 def prosecutor_node(state: AgentState) -> dict:
     """
-    The Prosecutor evaluates all 5 repo-targeted criteria independently.
+    The Prosecutor evaluates ALL criteria that have collected evidence.
     Returns one JudicialOpinion per criterion.
     """
-    evidences = state.get("evidences", {})
-    opinions = []
+    return _run_judge(state, "Prosecutor", _PROSECUTOR_SYSTEM, fallback_score=1)
 
-    repo_criteria = [
-        "git_forensic_analysis",
-        "state_management_rigor",
-        "graph_orchestration",
-        "safe_tool_engineering",
-        "structured_output_enforcement",
-    ]
+
+def _run_judge(
+    state: AgentState,
+    judge_name: str,
+    system_prompt: str,
+    fallback_score: int,
+) -> dict:
+    """Shared judge runner — evaluates all criteria with evidence."""
+    evidences = state.get("evidences", {})
+    criteria = _find_evaluated_criteria(evidences)
+    opinions = []
 
     llm = _make_llm()
     structured_llm = llm.with_structured_output(JudicialOpinion)
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", _PROSECUTOR_SYSTEM),
+        ("system", system_prompt),
         ("human", (
             "{rubric_standard}\n\n"
             "Evidence collected by the detective:\n"
             "{evidence_summary}\n\n"
             "Return your JudicialOpinion.\n"
-            "Set judge=\"Prosecutor\" and criterion_id=\"{criterion_id}\"."
+            "Set judge=\"{judge_name}\" and criterion_id=\"{criterion_id}\"."
         )),
     ])
 
     chain = prompt | structured_llm
 
-    for criterion_id in repo_criteria:
-        evidence_key = f"repo_investigator_{criterion_id}"
-        raw_evidences = evidences.get(evidence_key, [])
+    for criterion_id in criteria:
+        raw_evidences = _collect_evidence_for_criterion(evidences, criterion_id)
         evidence_summary = _sanitize_for_judge(raw_evidences)
         rubric_standard = _get_criterion_rubric(criterion_id)
 
@@ -150,24 +176,23 @@ def prosecutor_node(state: AgentState) -> dict:
                 "criterion_id": criterion_id,
                 "rubric_standard": rubric_standard,
                 "evidence_summary": evidence_summary,
+                "judge_name": judge_name,
             })
-            # Enforce correct judge label regardless of LLM output
-            if opinion.judge != "Prosecutor":
-                opinion = opinion.model_copy(update={"judge": "Prosecutor"})
+            if opinion.judge != judge_name:
+                opinion = opinion.model_copy(update={"judge": judge_name})
             opinions.append(opinion)
 
         except Exception as exc:
-            # RISK-5: Never crash the graph. Return a minimal opinion on failure.
             opinions.append(JudicialOpinion(
-                judge="Prosecutor",
+                judge=judge_name,
                 criterion_id=criterion_id,
-                score=1,
-                argument=f"[PROSECUTOR ERROR] Structured output failed: {str(exc)[:200]}",
+                score=fallback_score,
+                argument=f"[{judge_name.upper()} ERROR] Structured output failed: {str(exc)[:200]}",
                 cited_evidence=[],
             ))
 
-        # Respect Gemini free-tier rate limit (15 RPM) — 5s gap = 12 RPM
-        time.sleep(5)
+        # Rate limit guard — keeps us under API RPM limits
+        time.sleep(3)
 
     return {"opinions": opinions}
 
@@ -194,60 +219,8 @@ Return a JudicialOpinion with judge="Defense". No prose outside the structured f
 
 
 def defense_node(state: AgentState) -> dict:
-    """Defense Attorney — evaluates all 5 repo-targeted criteria."""
-    evidences = state.get("evidences", {})
-    opinions = []
-
-    repo_criteria = [
-        "git_forensic_analysis",
-        "state_management_rigor",
-        "graph_orchestration",
-        "safe_tool_engineering",
-        "structured_output_enforcement",
-    ]
-
-    llm = _make_llm()
-    structured_llm = llm.with_structured_output(JudicialOpinion)
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", _DEFENSE_SYSTEM),
-        ("human", (
-            "{rubric_standard}\n\n"
-            "Evidence collected by the detective:\n"
-            "{evidence_summary}\n\n"
-            "Return your JudicialOpinion.\n"
-            "Set judge=\"Defense\" and criterion_id=\"{criterion_id}\"."
-        )),
-    ])
-
-    chain = prompt | structured_llm
-
-    for criterion_id in repo_criteria:
-        evidence_key = f"repo_investigator_{criterion_id}"
-        raw_evidences = evidences.get(evidence_key, [])
-        evidence_summary = _sanitize_for_judge(raw_evidences)
-        rubric_standard = _get_criterion_rubric(criterion_id)
-
-        try:
-            opinion: JudicialOpinion = chain.invoke({
-                "criterion_id": criterion_id,
-                "rubric_standard": rubric_standard,
-                "evidence_summary": evidence_summary,
-            })
-            if opinion.judge != "Defense":
-                opinion = opinion.model_copy(update={"judge": "Defense"})
-            opinions.append(opinion)
-
-        except Exception as exc:
-            opinions.append(JudicialOpinion(
-                judge="Defense",
-                criterion_id=criterion_id,
-                score=3,
-                argument=f"[DEFENSE ERROR] Structured output failed: {str(exc)[:200]}",
-                cited_evidence=[],
-            ))
-
-    return {"opinions": opinions}
+    """Defense Attorney — evaluates all criteria with available evidence."""
+    return _run_judge(state, "Defense", _DEFENSE_SYSTEM, fallback_score=3)
 
 
 # ---------------------------------------------------------------------------
@@ -274,57 +247,5 @@ Return a JudicialOpinion with judge="TechLead". No prose outside the structured 
 
 
 def techlead_node(state: AgentState) -> dict:
-    """Tech Lead — evaluates all 5 repo-targeted criteria."""
-    evidences = state.get("evidences", {})
-    opinions = []
-
-    repo_criteria = [
-        "git_forensic_analysis",
-        "state_management_rigor",
-        "graph_orchestration",
-        "safe_tool_engineering",
-        "structured_output_enforcement",
-    ]
-
-    llm = _make_llm()
-    structured_llm = llm.with_structured_output(JudicialOpinion)
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", _TECHLEAD_SYSTEM),
-        ("human", (
-            "{rubric_standard}\n\n"
-            "Evidence collected by the detective:\n"
-            "{evidence_summary}\n\n"
-            "Return your JudicialOpinion.\n"
-            "Set judge=\"TechLead\" and criterion_id=\"{criterion_id}\"."
-        )),
-    ])
-
-    chain = prompt | structured_llm
-
-    for criterion_id in repo_criteria:
-        evidence_key = f"repo_investigator_{criterion_id}"
-        raw_evidences = evidences.get(evidence_key, [])
-        evidence_summary = _sanitize_for_judge(raw_evidences)
-        rubric_standard = _get_criterion_rubric(criterion_id)
-
-        try:
-            opinion: JudicialOpinion = chain.invoke({
-                "criterion_id": criterion_id,
-                "rubric_standard": rubric_standard,
-                "evidence_summary": evidence_summary,
-            })
-            if opinion.judge != "TechLead":
-                opinion = opinion.model_copy(update={"judge": "TechLead"})
-            opinions.append(opinion)
-
-        except Exception as exc:
-            opinions.append(JudicialOpinion(
-                judge="TechLead",
-                criterion_id=criterion_id,
-                score=2,
-                argument=f"[TECHLEAD ERROR] Structured output failed: {str(exc)[:200]}",
-                cited_evidence=[],
-            ))
-
-    return {"opinions": opinions}
+    """Tech Lead — evaluates all criteria with available evidence."""
+    return _run_judge(state, "TechLead", _TECHLEAD_SYSTEM, fallback_score=2)
