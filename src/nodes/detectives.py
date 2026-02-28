@@ -526,10 +526,14 @@ def _classify_diagram(image_b64: str) -> str:
         message = HumanMessage(
             content=[
                 {"type": "text", "text": (
-                    "Classify this diagram in exactly one sentence. "
-                    "Is it: (a) a LangGraph StateGraph showing parallel fan-out/fan-in, "
-                    "(b) a sequence diagram, (c) a generic flowchart, or (d) not an architecture diagram? "
-                    "Does it show parallel branches for detectives and judges?"
+                    "You are auditing an AI multi-agent system architecture diagram. "
+                    "Analyze this diagram and answer: "
+                    "1) Does it show parallel branches (fan-out) from a START node to multiple agents? "
+                    "2) Does it show a convergence point (fan-in) where parallel branches merge? "
+                    "3) Are there labeled nodes for detectives/investigators and judges? "
+                    "4) Does it represent a LangGraph StateGraph topology rather than a generic flowchart? "
+                    "Respond in one sentence describing what it shows and whether it meets "
+                    "the criteria of a proper LangGraph StateGraph with parallel fan-out/fan-in topology."
                 )},
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
             ]
