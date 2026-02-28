@@ -162,12 +162,19 @@ def cross_reference_paths(
             if ev.found and ev.location != "N/A":
                 known_locations.add(ev.location)
 
+    # Well-known root-level repo files that RI doesn't produce evidence for
+    # but are valid references if mentioned in the PDF.
+    _KNOWN_ROOT_FILES = {"rubric.json", "CLAUDE.md", "pyproject.toml", ".env.example"}
+
     verified = []
     hallucinated = []
 
     for path in mentioned_paths:
-        # Check if any known location contains this path (partial match)
-        if any(path in loc or loc in path for loc in known_locations):
+        # Check against known root files first
+        if path in _KNOWN_ROOT_FILES:
+            verified.append(path)
+        # Then check if any known evidence location contains this path (partial match)
+        elif any(path in loc or loc in path for loc in known_locations):
             verified.append(path)
         else:
             hallucinated.append(path)
