@@ -36,7 +36,7 @@ _DIMENSION_NAMES: dict[str, str] = {
     d["id"]: d["name"] for d in _RUBRIC["dimensions"]
 }
 
-_MODEL = "gpt-4o-mini"
+_MODEL = "deepseek-r1:8b"
 
 # All known criteria from rubric.json
 _ALL_CRITERIA = [d["id"] for d in _RUBRIC["dimensions"]]
@@ -259,7 +259,7 @@ def _llm_remediation(
 ) -> str:
     """Generate targeted remediation using judge arguments as context."""
     try:
-        llm = ChatOpenAI(model=_MODEL, temperature=0.1)
+        llm = ChatOpenAI(model=_MODEL, base_url="http://localhost:11434/v1", api_key="ollama", temperature=0.0)
         arguments = "\n".join(
             f"- {o.judge} (score {o.score}): {o.argument[:200]}"
             for o in opinions[:3]

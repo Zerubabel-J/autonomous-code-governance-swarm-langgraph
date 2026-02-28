@@ -40,11 +40,16 @@ _DIMENSIONS_BY_ID: dict[str, dict] = {
 # Shared LLM factory — model name in one place
 # ---------------------------------------------------------------------------
 
-_MODEL = "gpt-4o-mini"
+_MODEL = "deepseek-r1:8b"
 
 
 def _make_llm() -> ChatOpenAI:
-    return ChatOpenAI(model=_MODEL, temperature=0.2)
+    return ChatOpenAI(
+        model=_MODEL,
+        base_url="http://localhost:11434/v1",
+        api_key="ollama",
+        temperature=0.0,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -171,28 +176,40 @@ def _run_judge(
         evidence_summary = _sanitize_for_judge(raw_evidences)
         rubric_standard = _get_criterion_rubric(criterion_id)
 
-        try:
-            opinion: JudicialOpinion = chain.invoke({
-                "criterion_id": criterion_id,
-                "rubric_standard": rubric_standard,
-                "evidence_summary": evidence_summary,
-                "judge_name": judge_name,
-            })
-            if opinion.judge != judge_name:
-                opinion = opinion.model_copy(update={"judge": judge_name})
-            opinions.append(opinion)
+        inputs = {
+            "criterion_id": criterion_id,
+            "rubric_standard": rubric_standard,
+            "evidence_summary": evidence_summary,
+            "judge_name": judge_name,
+        }
 
-        except Exception as exc:
+        # Retry loop: 2 attempts with back-off to handle transient API errors.
+        # Structured output must parse to JudicialOpinion — if it fails, retry once.
+        last_exc = None
+        for attempt in range(2):
+            try:
+                opinion: JudicialOpinion = chain.invoke(inputs)
+                if opinion.judge != judge_name:
+                    opinion = opinion.model_copy(update={"judge": judge_name})
+                opinions.append(opinion)
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt == 0:
+                    time.sleep(2)  # brief wait before retry
+
+        if last_exc is not None:
             opinions.append(JudicialOpinion(
                 judge=judge_name,
                 criterion_id=criterion_id,
                 score=fallback_score,
-                argument=f"[{judge_name.upper()} ERROR] Structured output failed: {str(exc)[:200]}",
+                argument=f"[{judge_name.upper()} ERROR] Structured output failed after 2 attempts: {str(last_exc)[:200]}",
                 cited_evidence=[],
             ))
 
-        # Rate limit guard — keeps us under API RPM limits
-        time.sleep(3)
+        # No rate limiting needed for local Ollama inference
+        pass
 
     return {"opinions": opinions}
 

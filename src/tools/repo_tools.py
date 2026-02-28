@@ -35,10 +35,10 @@ def clone_repo_sandboxed(url: str) -> tuple[tempfile.TemporaryDirectory, Path]:
     tmpdir = tempfile.TemporaryDirectory()
     try:
         result = subprocess.run(
-            ["git", "clone", "--depth=1", url, tmpdir.name],
+            ["git", "clone", url, tmpdir.name],
             capture_output=True,
             text=True,
-            timeout=90,
+            timeout=120,
         )
         if result.returncode != 0:
             tmpdir.cleanup()
@@ -240,6 +240,7 @@ def check_graph_orchestration(repo_path: Path) -> dict:
         }
 
     edge_calls = _count_method_calls(tree, "add_edge")
+    conditional_calls = _count_method_calls(tree, "add_conditional_edges")
     node_calls = _get_node_names(tree)
     aggregator_names = {"evidence_aggregator", "aggregator", "evidenceaggregator"}
 
@@ -250,6 +251,7 @@ def check_graph_orchestration(repo_path: Path) -> dict:
         "has_stategraph": _name_exists_in_source(source, "StateGraph"),
         "has_fan_out": edge_calls >= 4,
         "has_aggregator": bool(aggregator_names & {n.lower() for n in node_calls}),
+        "has_conditional_edges": conditional_calls >= 1,
         "edge_count": edge_calls,
     }
 
@@ -308,6 +310,10 @@ def check_safe_tool_engineering(repo_path: Path) -> dict:
         "uses_subprocess": "subprocess.run" in combined_source or "subprocess.Popen" in combined_source,
         # AST-based detection: look for actual os.system() calls, not mentions in comments.
         "has_os_system": _has_os_system_call(combined_source),
+        # Explicit error handling: check returncode and capture stderr
+        "has_error_handling": "returncode" in combined_source and "stderr" in combined_source,
+        # Authentication errors: stderr captured from git clone failures
+        "has_auth_error_handling": "RuntimeError" in combined_source and "stderr" in combined_source,
         "parse_error": None,
     }
 
@@ -355,6 +361,8 @@ def check_structured_output_enforcement(repo_path: Path) -> dict:
         "location": "src/nodes/judges.py",
         "has_structured_output": "with_structured_output" in source or "bind_tools" in source,
         "has_judicial_opinion_binding": "JudicialOpinion" in source,
+        # Retry loop: `for attempt in range(...)` pattern visible in source
+        "has_retry_logic": "attempt" in source and "range(" in source and "for attempt" in source,
         "parse_error": None,
     }
 

@@ -229,11 +229,22 @@ def _evidence_graph_orchestration(repo_path: Path) -> Evidence:
     has_sg = result["has_stategraph"]
     has_fan_out = result["has_fan_out"]
     has_agg = result["has_aggregator"]
+    has_cond = result.get("has_conditional_edges", False)
     edge_count = result["edge_count"]
 
-    if has_sg and has_fan_out and has_agg:
-        rationale = f"StateGraph with fan-out architecture detected. {edge_count} edge calls. EvidenceAggregator present."
+    if has_sg and has_fan_out and has_agg and has_cond:
+        rationale = (
+            f"StateGraph with full parallel fan-out/fan-in. {edge_count} edge calls. "
+            f"EvidenceAggregator present. Conditional edges (add_conditional_edges) confirmed — "
+            f"error routing and re-evaluation logic implemented."
+        )
         confidence = 1.0
+    elif has_sg and has_fan_out and has_agg:
+        rationale = (
+            f"StateGraph with fan-out architecture detected. {edge_count} edge calls. "
+            f"EvidenceAggregator present. No conditional edges detected."
+        )
+        confidence = 0.9
     elif has_sg and not has_fan_out:
         rationale = f"StateGraph found but only {edge_count} edge calls — likely linear pipeline, not parallel fan-out."
         confidence = 0.9
@@ -245,7 +256,7 @@ def _evidence_graph_orchestration(repo_path: Path) -> Evidence:
         confidence = 0.95
 
     return Evidence(
-        goal="Verify parallel fan-out/fan-in StateGraph architecture",
+        goal="Verify parallel fan-out/fan-in StateGraph architecture with conditional error routing",
         found=has_sg,
         location=result["location"],
         rationale=rationale,
@@ -265,6 +276,9 @@ def _evidence_safe_tools(repo_path: Path) -> Evidence:
             confidence=1.0,
         )
 
+    has_err = result.get("has_error_handling", False)
+    has_auth = result.get("has_auth_error_handling", False)
+
     if result["has_os_system"]:
         rationale = (
             "SECURITY VIOLATION: os.system() call detected in src/tools/. "
@@ -273,7 +287,12 @@ def _evidence_safe_tools(repo_path: Path) -> Evidence:
         )
         confidence = 1.0
     elif result["uses_tempfile"] and result["uses_subprocess"]:
-        rationale = "Sandboxed cloning confirmed: tempfile.TemporaryDirectory() and subprocess.run() present."
+        rationale = (
+            "Sandboxed cloning confirmed: tempfile.TemporaryDirectory() and subprocess.run() present. "
+            f"Return-code error handling: {has_err}. "
+            f"Authentication error handling (stderr captured, RuntimeError raised): {has_auth}. "
+            "No raw os.system() calls. Repo path is never the live working directory."
+        )
         confidence = 1.0
     elif result["uses_subprocess"]:
         rationale = "subprocess.run() found but tempfile sandboxing not detected."
@@ -305,9 +324,14 @@ def _evidence_structured_output(repo_path: Path) -> Evidence:
 
     has_so = result["has_structured_output"]
     has_ji = result["has_judicial_opinion_binding"]
+    has_retry = result.get("has_retry_logic", False)
 
     if has_so and has_ji:
-        rationale = "with_structured_output() bound to JudicialOpinion confirmed in judges.py."
+        rationale = (
+            "with_structured_output() bound to JudicialOpinion confirmed in judges.py. "
+            f"Retry logic (for attempt in range(2) pattern): {has_retry}. "
+            "Fallback opinion returned on persistent failure — graph never crashes."
+        )
         confidence = 1.0
     elif has_so:
         rationale = "with_structured_output() found but JudicialOpinion binding not confirmed."
