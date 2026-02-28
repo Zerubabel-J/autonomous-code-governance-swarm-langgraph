@@ -40,14 +40,12 @@ _DIMENSIONS_BY_ID: dict[str, dict] = {
 # Shared LLM factory — model name in one place
 # ---------------------------------------------------------------------------
 
-_MODEL = "deepseek-r1:8b"
+_MODEL = "gpt-4o-mini"
 
 
 def _make_llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=_MODEL,
-        base_url="http://localhost:11434/v1",
-        api_key="ollama",
         temperature=0.0,
     )
 
