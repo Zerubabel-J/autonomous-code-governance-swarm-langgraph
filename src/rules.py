@@ -17,17 +17,10 @@ from typing import Dict, List, Optional
 from src.state import Evidence, JudicialOpinion
 
 
-# Keywords that constitute a confirmed security violation in Prosecutor arguments.
-# Source: rubric.json synthesis_rules.security_override
-_SECURITY_VIOLATION_KEYWORDS = [
-    "os.system",
-    "shell injection",
-    "unsanitized input",
-    "command injection",
-    "security vulnerability",
-    "security flaw",
-    "security negligence",
-]
+# Prefix used exclusively by _evidence_safe_tools() when has_os_system=True.
+# Must match the exact string set in detectives.py to avoid false positives
+# from rationales that say "No raw os.system() calls" (negative context).
+_SECURITY_VIOLATION_PREFIX = "SECURITY VIOLATION:"
 
 
 # ---------------------------------------------------------------------------
@@ -60,8 +53,10 @@ def apply_security_rule(
 
 
 def _contains_security_violation(text: str) -> bool:
-    text_lower = text.lower()
-    return any(kw in text_lower for kw in _SECURITY_VIOLATION_KEYWORDS)
+    # Only the explicit "SECURITY VIOLATION:" prefix (set by AST tool when
+    # has_os_system=True) triggers the cap. Negative mentions like
+    # "No raw os.system() calls" must NOT trigger this rule.
+    return _SECURITY_VIOLATION_PREFIX in text
 
 
 # ---------------------------------------------------------------------------

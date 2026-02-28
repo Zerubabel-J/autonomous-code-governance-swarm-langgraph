@@ -94,14 +94,15 @@ def build_graph(parallel: bool = True):
         # --- RI and VI run in parallel from START ---
         # DocAnalyst (DA) runs AFTER RepoInvestigator so it can cross-reference
         # PDF-mentioned file paths against verified repo evidence.
+        # All three detectives fan-in to EA via a list edge (LangGraph waits for all).
         builder.add_edge(START, "repo_investigator")
         builder.add_edge(START, "vision_inspector")
 
-        # RI fans out to DA (sequential — DA needs RI evidence) and EA
-        # VI fans in to EA independently
+        # RI → DA (sequential, DA needs RI evidence for cross-reference)
         builder.add_edge("repo_investigator", "doc_analyst")
-        builder.add_edge("doc_analyst", "evidence_aggregator")
-        builder.add_edge("vision_inspector", "evidence_aggregator")
+
+        # Fan-in: EA only fires once when BOTH DA and VI have completed
+        builder.add_edge(["doc_analyst", "vision_inspector"], "evidence_aggregator")
 
         # --- Conditional routing: full panel OR forensic_failure ---
         # "judicial_panel" routes to all 3 judges in parallel (fan-out)

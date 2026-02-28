@@ -142,8 +142,11 @@ def _adjudicate_criterion(
 ) -> CriterionResult:
     """Apply all four deterministic rules and produce a CriterionResult."""
 
-    # Rule 1: Security Override
-    score_cap = apply_security_rule(opinions, evidences)
+    # Rule 1: Security Override — only check evidence for THIS criterion
+    # to avoid false positives from other criteria mentioning "os.system" in
+    # negative contexts (e.g. "No raw os.system() calls detected").
+    criterion_evidences = {k: v for k, v in evidences.items() if criterion_id in k}
+    score_cap = apply_security_rule(opinions, criterion_evidences)
 
     # Rule 2: Fact Supremacy
     opinions = apply_evidence_rule(opinions, evidences, criterion_id)
